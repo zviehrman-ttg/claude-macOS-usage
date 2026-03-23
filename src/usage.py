@@ -1,6 +1,7 @@
 """Usage data fetching from claude.ai and Claude CLI stats."""
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -41,43 +42,77 @@ def fetch_claude_ai_usage(session_key, org_id):
 
 
 def _parse_usage_response(data):
-    """Parse the claude.ai /usage API response."""
+    """Parse the claude.ai /usage API response.
+
+    Supports two plan modes:
+    - "token_cap": Pro/Max plans with hourly/weekly utilization percentages
+    - "spend_cap": Enterprise/budget plans with dollar spend limits
+    """
     result = {
+        "plan_mode": "token_cap",  # default; overridden to "spend_cap" if detected
         "session": {"percent": 0, "reset_at": "", "label": "Current session"},
         "weekly_all": {"percent": 0, "reset_at": "", "label": "Current week (all models)"},
         "weekly_sonnet": {"percent": 0, "reset_at": "", "label": "Current week (Sonnet only)"},
+        "spend": None,       # populated for spend_cap plans
         "extra_usage": None,
     }
 
     if not isinstance(data, dict):
         return result
 
-    # five_hour = current session usage
+    # --- Token-cap plan fields (Pro / Max) ---
     fh = data.get("five_hour")
     if isinstance(fh, dict):
         result["session"]["percent"] = int(fh.get("utilization", 0))
         result["session"]["reset_at"] = _format_reset_time(fh.get("resets_at"))
 
-    # seven_day = weekly all models
     sd = data.get("seven_day")
     if isinstance(sd, dict):
         result["weekly_all"]["percent"] = int(sd.get("utilization", 0))
         result["weekly_all"]["reset_at"] = _format_reset_time(sd.get("resets_at"))
 
-    # seven_day_sonnet = weekly Sonnet only
     sds = data.get("seven_day_sonnet")
     if isinstance(sds, dict):
         result["weekly_sonnet"]["percent"] = int(sds.get("utilization", 0))
         result["weekly_sonnet"]["reset_at"] = _format_reset_time(sds.get("resets_at"))
 
-    # extra_usage info
+    has_token_data = isinstance(fh, dict) or isinstance(sd, dict) or isinstance(sds, dict)
+
+    # --- Spend-cap plan detection ---
+    # Enterprise plans use extra_usage with credit units (1 credit = $0.01).
+    # When five_hour/seven_day are null, extra_usage IS the primary usage metric.
     eu = data.get("extra_usage")
     if isinstance(eu, dict) and eu.get("is_enabled"):
-        result["extra_usage"] = {
-            "enabled": True,
-            "used_credits": eu.get("used_credits", 0),
-            "monthly_limit": eu.get("monthly_limit"),
-        }
+        used_credits = eu.get("used_credits", 0) or 0
+        monthly_limit = eu.get("monthly_limit", 0) or 0
+        utilization = eu.get("utilization", 0) or 0
+
+        if not has_token_data:
+            # Enterprise / contracted plan: extra_usage is the spend limit.
+            # Credits are in units of $0.01 (30000 credits = $300).
+            amount_dollars = used_credits / 100
+            limit_dollars = monthly_limit / 100
+            percent = round(utilization, 1) if utilization else (
+                int(used_credits / monthly_limit * 100) if monthly_limit else 0
+            )
+            result["plan_mode"] = "spend_cap"
+            result["spend"] = {
+                "amount": amount_dollars,
+                "limit": limit_dollars,
+                "percent": int(percent),
+                "reset_at": "",  # enterprise resets are contract-defined
+            }
+        else:
+            # Pro/Max top-up credits alongside normal token limits
+            result["extra_usage"] = {
+                "enabled": True,
+                "used_credits": used_credits,
+                "monthly_limit": monthly_limit,
+            }
+
+    if result["plan_mode"] == "token_cap" and not has_token_data:
+        logging.debug("claude.ai /usage response keys (unknown plan): %s", list(data.keys()))
+        result["plan_mode"] = "unknown"
 
     return result
 

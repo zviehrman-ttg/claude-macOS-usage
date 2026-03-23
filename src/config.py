@@ -35,6 +35,10 @@ TIERS = {
         "name": "Max 20x",
         "price": "$200/mo",
     },
+    "enterprise": {
+        "name": "Enterprise",
+        "price": "Enterprise",
+    },
 }
 
 # Map API rate_limit_tier values to our tier keys
@@ -48,6 +52,13 @@ TIER_MAP = {
     "default_claude_max_20x": "max_20x",
     "max_20x": "max_20x",
     "max-20x": "max_20x",
+    "enterprise": "enterprise",
+    "claude_enterprise": "enterprise",
+    "default_claude_enterprise": "enterprise",
+    "default_claude_ai": "enterprise",
+    "default_raven_enterprise": "enterprise",
+    "raven_enterprise": "enterprise",
+    "business": "enterprise",
 }
 
 AUTO_REFRESH_INTERVAL = 300  # 5 minutes

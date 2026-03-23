@@ -248,17 +248,25 @@ def validate_session(session_key):
         if not isinstance(orgs, list) or len(orgs) == 0:
             return None
 
-        # Prefer the org with a paid chat subscription (stripe_subscription)
-        # That's where usage limits actually apply
+        # Prefer the org with a paid chat subscription.
+        # Priority: contracted enterprise > standard stripe > any chat org
         best_org = orgs[0]
+        best_priority = -1
         for org in orgs:
-            billing = org.get("billing_type", "")
+            billing = org.get("billing_type", "") or ""
             caps = org.get("capabilities", [])
-            if billing == "stripe_subscription" and "chat" in caps:
-                best_org = org
-                break
-            # Fallback: any org with chat capability
-            if "chat" in caps and best_org.get("billing_type") is None:
+            if "chat" not in caps:
+                continue
+            if billing == "stripe_subscription_contracted":
+                priority = 2
+            elif billing == "stripe_subscription":
+                priority = 1
+            elif billing:
+                priority = 0
+            else:
+                priority = -1
+            if priority > best_priority:
+                best_priority = priority
                 best_org = org
 
         return {

@@ -25,7 +25,7 @@ from .auth import (
     save_session_key,
     validate_session,
 )
-from .config import APP_NAME, AUTO_REFRESH_INTERVAL, TIERS
+from .config import APP_NAME, AUTO_REFRESH_INTERVAL, TIER_MAP, TIERS
 from .usage import (
     build_bar,
     fetch_claude_ai_usage,
@@ -83,6 +83,7 @@ class ClaudeUsageApp(rumps.App):
 
             org_id = None
             has_session = False
+            session_tier = None
 
             # Check for existing session key
             session_key = get_session_key()
@@ -91,6 +92,7 @@ class ClaudeUsageApp(rumps.App):
                 if result:
                     org_id = result["org_id"]
                     has_session = True
+                    session_tier = result.get("rate_limit_tier")
 
             # Try auto-extracting from Chrome if no session
             if not has_session:
@@ -101,10 +103,15 @@ class ClaudeUsageApp(rumps.App):
                         save_session_key(chrome_key)
                         org_id = result["org_id"]
                         has_session = True
+                        session_tier = result.get("rate_limit_tier")
 
             # Apply results on main thread
             def _apply():
-                if tier:
+                # Prefer the org's live rate_limit_tier over the CLI-cached one
+                resolved_tier = TIER_MAP.get(session_tier) if session_tier else None
+                if resolved_tier:
+                    self.tier = resolved_tier
+                elif tier:
                     self.tier = tier
                 self.username = username
                 self.cli_stats = cli_stats
@@ -130,11 +137,13 @@ class ClaudeUsageApp(rumps.App):
         tier_info = TIERS.get(self.tier, TIERS["pro"])
         resets = get_reset_countdown()
 
-        # Header
+        # Header — omit price if it's the same as the plan name (e.g. Enterprise)
+        price = tier_info["price"]
+        tier_label = tier_info["name"] if price == tier_info["name"] else f"{tier_info['name']} ({price})"
         if self.username:
-            header = f"{self.username} - {tier_info['name']} ({tier_info['price']})"
+            header = f"{self.username} - {tier_label}"
         else:
-            header = f"{tier_info['name']} ({tier_info['price']})"
+            header = tier_label
         if self.has_cli_creds:
             header += "  \u2713"  # checkmark
 
@@ -143,20 +152,48 @@ class ClaudeUsageApp(rumps.App):
 
         # ---- Live usage (from claude.ai session) ----
         if self.live_usage:
-            for key in ("session", "weekly_all", "weekly_sonnet"):
-                bucket = self.live_usage[key]
-                pct = bucket["percent"]
-                reset = bucket["reset_at"]
-                label = bucket["label"]
+            plan_mode = self.live_usage.get("plan_mode", "token_cap")
 
-                self.menu.add(rumps.MenuItem(f"  {label}", callback=_noop))
+            if plan_mode == "spend_cap":
+                spend = self.live_usage["spend"]
+                pct = spend["percent"]
+                amount = spend["amount"]
+                limit = spend["limit"]
+                reset = spend["reset_at"]
+                self.menu.add(rumps.MenuItem("  Monthly spend", callback=_noop))
                 self.menu.add(rumps.MenuItem(
                     f"    {build_bar(pct)}  {pct}% used",
+                    callback=_noop,
+                ))
+                self.menu.add(rumps.MenuItem(
+                    f"    ${amount:.2f} of ${limit:.2f} spent",
                     callback=_noop,
                 ))
                 if reset:
                     self.menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
                 self.menu.add(rumps.separator)
+
+            elif plan_mode == "unknown":
+                self.menu.add(rumps.MenuItem("  Usage data unavailable for this plan", callback=_noop))
+                self.menu.add(rumps.MenuItem("  See claude.ai/settings/usage", callback=_noop))
+                self.menu.add(rumps.separator)
+
+            else:
+                # token_cap: Pro / Max plans
+                for key in ("session", "weekly_all", "weekly_sonnet"):
+                    bucket = self.live_usage[key]
+                    pct = bucket["percent"]
+                    reset = bucket["reset_at"]
+                    label = bucket["label"]
+
+                    self.menu.add(rumps.MenuItem(f"  {label}", callback=_noop))
+                    self.menu.add(rumps.MenuItem(
+                        f"    {build_bar(pct)}  {pct}% used",
+                        callback=_noop,
+                    ))
+                    if reset:
+                        self.menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
+                    self.menu.add(rumps.separator)
 
         elif self.has_session:
             self.menu.add(rumps.MenuItem("  Loading live usage...", callback=_noop))
@@ -280,7 +317,14 @@ class ClaudeUsageApp(rumps.App):
 
     def _update_title_icon(self):
         if self.live_usage:
-            pct = self.live_usage["session"]["percent"]
+            plan_mode = self.live_usage.get("plan_mode", "token_cap")
+            if plan_mode == "spend_cap" and self.live_usage.get("spend"):
+                pct = self.live_usage["spend"]["percent"]
+            elif plan_mode == "token_cap":
+                pct = self.live_usage["session"]["percent"]
+            else:
+                self.title = "\u2728"
+                return
         elif self.cli_stats and self.cli_stats["today_messages"] > 0:
             # Rough estimate: assume ~100 msgs/day for Pro, scale by tier
             tier_daily = {"free": 25, "pro": 100, "max_5x": 500, "max_20x": 2000}

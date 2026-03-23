@@ -1,5 +1,5 @@
 rumps==0.4.0
 requests==2.31.0
 keyring==25.0.0
-py2app==0.28.0
+py2app==0.28.10
 pycryptodome==3.20.0
