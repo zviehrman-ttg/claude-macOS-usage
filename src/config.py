@@ -5,6 +5,7 @@ import os
 APP_NAME = "Claude Usage Monitor"
 KEYCHAIN_SERVICE = "claude-usage-monitor"
 KEYCHAIN_ACCOUNT_SESSION = "claude-session-key"
+KEYCHAIN_ACCOUNT_ORG = "claude-preferred-org"
 
 # Claude CLI credential in Keychain
 CLI_KEYCHAIN_SERVICE = "Claude Code-credentials"

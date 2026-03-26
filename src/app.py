@@ -12,18 +12,21 @@ from datetime import datetime
 import rumps
 
 from .auth import (
+    delete_preferred_org,
     delete_session_key,
     detect_tier_from_cli,
     extract_chrome_session_key,
+    get_chat_organizations,
     get_cli_credentials,
     get_cli_username,
+    get_preferred_org,
     get_session_cookie_instructions,
     get_session_key,
     has_cli_credentials,
     open_claude_login,
     open_claude_settings,
+    save_preferred_org,
     save_session_key,
-    validate_session,
 )
 from .config import APP_NAME, AUTO_REFRESH_INTERVAL, TIER_MAP, TIERS
 from .usage import (
@@ -64,6 +67,7 @@ class ClaudeUsageApp(rumps.App):
         self.is_refreshing = False
         self.has_session = False
         self.has_cli_creds = False  # Cached to avoid subprocess in menu builds
+        self.available_orgs = []
 
         self._detect_on_launch()
         self._build_menu()
@@ -72,6 +76,15 @@ class ClaudeUsageApp(rumps.App):
         self.timer.start()
 
     # --- Startup ---
+
+    def _select_org(self, chat_orgs):
+        """Pick the best org from available chat orgs using saved preference."""
+        preferred = get_preferred_org()
+        if preferred:
+            for org in chat_orgs:
+                if org["org_id"] == preferred:
+                    return org
+        return chat_orgs[0] if chat_orgs else None
 
     def _detect_on_launch(self):
         """Detect CLI credentials and existing session on launch (off main thread)."""
@@ -84,26 +97,28 @@ class ClaudeUsageApp(rumps.App):
             org_id = None
             has_session = False
             session_tier = None
+            chat_orgs = []
 
             # Check for existing session key
             session_key = get_session_key()
             if session_key:
-                result = validate_session(session_key)
-                if result:
-                    org_id = result["org_id"]
-                    has_session = True
-                    session_tier = result.get("rate_limit_tier")
+                chat_orgs = get_chat_organizations(session_key)
 
-            # Try auto-extracting from Chrome if no session
-            if not has_session:
+            # Try auto-extracting from Chrome if no valid session
+            if not chat_orgs:
                 chrome_key = extract_chrome_session_key()
                 if chrome_key:
-                    result = validate_session(chrome_key)
-                    if result:
+                    chat_orgs = get_chat_organizations(chrome_key)
+                    if chat_orgs:
                         save_session_key(chrome_key)
-                        org_id = result["org_id"]
-                        has_session = True
-                        session_tier = result.get("rate_limit_tier")
+
+            # Select org if we have any
+            if chat_orgs:
+                has_session = True
+                selected = self._select_org(chat_orgs)
+                if selected:
+                    org_id = selected["org_id"]
+                    session_tier = selected.get("rate_limit_tier")
 
             # Apply results on main thread
             def _apply():
@@ -118,6 +133,7 @@ class ClaudeUsageApp(rumps.App):
                 self.has_cli_creds = cli_creds
                 self.org_id = org_id
                 self.has_session = has_session
+                self.available_orgs = chat_orgs
                 self._build_menu()
 
                 if self.has_session:
@@ -255,6 +271,19 @@ class ClaudeUsageApp(rumps.App):
         self.menu.add(rumps.MenuItem(refresh_label, callback=self._on_refresh))
         self.menu.add(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._on_open_settings))
 
+        # Organization switcher (only when multiple orgs available)
+        if len(self.available_orgs) > 1:
+            switch_menu = rumps.MenuItem("Switch Organization")
+            for org in self.available_orgs:
+                prefix = "\u25CF " if org["org_id"] == self.org_id else "   "
+                label = f"{prefix}{org['name']}"
+                item = rumps.MenuItem(
+                    label,
+                    callback=lambda sender, o=org: self._on_switch_org(o),
+                )
+                switch_menu.add(item)
+            self.menu.add(switch_menu)
+
         # Session management
         if self.has_session:
             self.menu.add(rumps.MenuItem("Disconnect Session", callback=self._on_disconnect))
@@ -356,17 +385,21 @@ class ClaudeUsageApp(rumps.App):
         def _try_auto_connect():
             chrome_key = extract_chrome_session_key()
             if chrome_key:
-                result = validate_session(chrome_key)
-                if result:
+                chat_orgs = get_chat_organizations(chrome_key)
+                if chat_orgs:
+                    save_session_key(chrome_key)
+                    selected = self._select_org(chat_orgs)
                     def _apply():
-                        save_session_key(chrome_key)
-                        self.org_id = result["org_id"]
+                        self.org_id = selected["org_id"]
+                        tier = TIER_MAP.get(selected.get("rate_limit_tier", ""))
+                        if tier:
+                            self.tier = tier
                         self.has_session = True
-                        rumps.notification(
-                            APP_NAME,
-                            "Connected automatically!",
-                            "Session extracted from Chrome cookies.",
-                        )
+                        self.available_orgs = chat_orgs
+                        msg = "Session extracted from Chrome cookies."
+                        if len(chat_orgs) > 1:
+                            msg += " Multiple orgs found — use Switch Organization."
+                        rumps.notification(APP_NAME, "Connected automatically!", msg)
                         self._build_menu()
                         self._refresh_data()
                     _run_on_main_thread(_apply)
@@ -394,14 +427,19 @@ class ClaudeUsageApp(rumps.App):
         session_key = response.text.strip().strip("'\"")
 
         def _validate():
-            result = validate_session(session_key)
+            chat_orgs = get_chat_organizations(session_key)
 
             def _apply():
-                if result:
+                if chat_orgs:
                     save_session_key(session_key)
-                    self.org_id = result["org_id"]
+                    selected = self._select_org(chat_orgs)
+                    self.org_id = selected["org_id"]
+                    tier = TIER_MAP.get(selected.get("rate_limit_tier", ""))
+                    if tier:
+                        self.tier = tier
                     self.has_session = True
-                    rumps.notification(APP_NAME, "Connected!", f"Org: {result.get('name', result['org_id'][:12])}")
+                    self.available_orgs = chat_orgs
+                    rumps.notification(APP_NAME, "Connected!", f"Org: {selected.get('name', selected['org_id'][:12])}")
                     self._build_menu()
                     self._refresh_data()
                 else:
@@ -416,11 +454,27 @@ class ClaudeUsageApp(rumps.App):
 
     def _on_disconnect(self, _):
         delete_session_key()
+        delete_preferred_org()
         self.has_session = False
         self.org_id = None
         self.live_usage = None
+        self.available_orgs = []
         self.title = "\u2728"
         self._build_menu()
+
+    def _on_switch_org(self, org):
+        def _do_switch():
+            save_preferred_org(org["org_id"])
+            def _apply():
+                self.org_id = org["org_id"]
+                tier = TIER_MAP.get(org.get("rate_limit_tier", ""))
+                if tier:
+                    self.tier = tier
+                self.live_usage = None
+                self._build_menu()
+                self._refresh_data()
+            _run_on_main_thread(_apply)
+        threading.Thread(target=_do_switch, daemon=True).start()
 
     def _on_quit(self, _):
         rumps.quit_application()

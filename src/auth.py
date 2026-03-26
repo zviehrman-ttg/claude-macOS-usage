@@ -18,6 +18,7 @@ from .config import (
     CLAUDE_AI_API,
     CLAUDE_AI_URL,
     CLAUDE_SETTINGS_URL,
+    KEYCHAIN_ACCOUNT_ORG,
     KEYCHAIN_ACCOUNT_SESSION,
     KEYCHAIN_SERVICE,
     TIER_MAP,
@@ -97,6 +98,24 @@ def save_session_key(session_key):
 def delete_session_key():
     try:
         keyring.delete_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_SESSION)
+    except keyring.errors.PasswordDeleteError:
+        pass
+
+
+def get_preferred_org():
+    """Get the preferred org ID from Keychain."""
+    return keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_ORG)
+
+
+def save_preferred_org(org_id):
+    """Save the preferred org ID to Keychain."""
+    keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_ORG, org_id)
+
+
+def delete_preferred_org():
+    """Delete the preferred org from Keychain."""
+    try:
+        keyring.delete_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_ORG)
     except keyring.errors.PasswordDeleteError:
         pass
 
@@ -278,6 +297,41 @@ def validate_session(session_key):
     except requests.RequestException:
         pass
     return None
+
+
+def get_chat_organizations(session_key):
+    """Fetch all chat-capable organizations for the session.
+
+    Returns list of dicts with org_id, name, billing_type, rate_limit_tier.
+    Empty list if session is invalid.
+    """
+    try:
+        resp = requests.get(
+            f"{CLAUDE_AI_API}/organizations",
+            headers=_session_headers(session_key),
+            timeout=10,
+            verify=True,
+        )
+        if resp.status_code != 200:
+            return []
+        orgs = resp.json()
+        if not isinstance(orgs, list):
+            return []
+
+        chat_orgs = []
+        for org in orgs:
+            caps = org.get("capabilities", [])
+            if "chat" not in caps:
+                continue
+            chat_orgs.append({
+                "org_id": org.get("uuid", org.get("id", "")),
+                "name": org.get("name", ""),
+                "billing_type": org.get("billing_type", ""),
+                "rate_limit_tier": org.get("rate_limit_tier", ""),
+            })
+        return chat_orgs
+    except requests.RequestException:
+        return []
 
 
 # --- Helpers ---
