@@ -358,3 +358,39 @@ def get_session_cookie_instructions():
         "5. Copy its Value and paste it here\n\n"
         "Stored securely in your macOS Keychain."
     )
+
+
+# --- Claude OAuth Usage (via CLI token, no session cookie needed) ---
+
+_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+_OAUTH_BETA_HEADER = "oauth-2025-04-20"
+
+
+def fetch_claude_oauth_usage() -> dict | None:
+    """Fetch live Claude usage via the CLI OAuth token.
+
+    Uses the same access token stored by `claude login` in Keychain.
+    Endpoint: GET https://api.anthropic.com/api/oauth/usage
+    Returns parsed usage dict or None on failure.
+    """
+    creds = get_cli_credentials()
+    if not creds or not creds.get("access_token"):
+        return None
+
+    try:
+        resp = requests.get(
+            _OAUTH_USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {creds['access_token']}",
+                "Accept": "application/json",
+                "anthropic-beta": _OAUTH_BETA_HEADER,
+                "User-Agent": "claude-macOS-usage/1.0",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+
+        return resp.json()
+    except Exception:
+        return None

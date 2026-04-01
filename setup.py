@@ -16,7 +16,7 @@ OPTIONS = {
         "LSUIElement": True,  # Hide from Dock (menu bar only)
         "NSHighResolutionCapable": True,
     },
-    "packages": ["rumps", "requests", "keyring", "certifi", "charset_normalizer", "urllib3", "idna"],
+    "packages": ["rumps", "requests", "certifi", "charset_normalizer", "urllib3", "idna"],
     "includes": ["src", "src.app", "src.auth", "src.config", "src.usage"],
 }
 

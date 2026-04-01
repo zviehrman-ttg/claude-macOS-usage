@@ -65,16 +65,19 @@ def _parse_usage_response(data):
     if isinstance(fh, dict):
         result["session"]["percent"] = int(fh.get("utilization", 0))
         result["session"]["reset_at"] = _format_reset_time(fh.get("resets_at"))
+        result["session"]["resets_at_iso"] = fh.get("resets_at", "")
 
     sd = data.get("seven_day")
     if isinstance(sd, dict):
         result["weekly_all"]["percent"] = int(sd.get("utilization", 0))
         result["weekly_all"]["reset_at"] = _format_reset_time(sd.get("resets_at"))
+        result["weekly_all"]["resets_at_iso"] = sd.get("resets_at", "")
 
     sds = data.get("seven_day_sonnet")
     if isinstance(sds, dict):
         result["weekly_sonnet"]["percent"] = int(sds.get("utilization", 0))
         result["weekly_sonnet"]["reset_at"] = _format_reset_time(sds.get("resets_at"))
+        result["weekly_sonnet"]["resets_at_iso"] = sds.get("resets_at", "")
 
     has_token_data = isinstance(fh, dict) or isinstance(sd, dict) or isinstance(sds, dict)
 
@@ -247,3 +250,102 @@ def shorten_model_name(model_id):
         "claude-haiku-4-5-20251001": "Haiku 4.5",
     }
     return mapping.get(model_id, model_id.split("/")[-1])
+
+
+
+
+def get_claude_code_token_stats():
+    """Parse ~/.claude/projects/**/*.jsonl for token usage today and this week."""
+    import glob
+    from datetime import datetime, timedelta
+
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    today_tokens = {}
+    week_tokens = {}
+
+    for f in glob.glob(os.path.expanduser("~/.claude/projects/**/*.jsonl"), recursive=True):
+        try:
+            for line in open(f, errors="ignore"):
+                entry = json.loads(line)
+                ts = entry.get("timestamp", "")
+                if not ts or ts < week_ago:
+                    continue
+                usage = (
+                    entry.get("usage")
+                    or entry.get("message", {}).get("usage")
+                    or {}
+                )
+                inp = usage.get("input_tokens", 0) or 0
+                out = usage.get("output_tokens", 0) or 0
+                total = inp + out
+                if not total:
+                    continue
+                model = (
+                    entry.get("message", {}).get("model")
+                    or entry.get("model")
+                    or "unknown"
+                )
+                week_tokens[model] = week_tokens.get(model, 0) + total
+                if ts[:10] == today:
+                    today_tokens[model] = today_tokens.get(model, 0) + total
+        except Exception:
+            continue
+
+    if not week_tokens:
+        return None
+    return {
+        "today_tokens_by_model": today_tokens,
+        "week_tokens_by_model": week_tokens,
+    }
+
+
+def predict_pace(used_pct: float, resets_at_iso: str | None, window_hours: int = 168) -> str:
+    """Return a pace prediction string: on track / runs out early / underutilising."""
+    if used_pct is None:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        total_secs = window_hours * 3600
+        if resets_at_iso and resets_at_iso.strip():
+            resets = datetime.fromisoformat(resets_at_iso)
+            if resets.tzinfo is None:
+                resets = resets.replace(tzinfo=timezone.utc)
+            elapsed_secs = total_secs - (resets - now).total_seconds()
+        else:
+            # No reset time — assume we're halfway through the window
+            elapsed_secs = total_secs / 2
+        if elapsed_secs <= 0:
+            elapsed_secs = total_secs * 0.01  # treat as 1% elapsed to avoid divide-by-zero
+        elapsed_pct = min(elapsed_secs / total_secs * 100, 100)
+        # At this pace, projected % at end of window
+        if elapsed_pct == 0:
+            return ""
+        projected = (used_pct / elapsed_pct) * 100
+        ratio = used_pct / max(elapsed_pct, 1)
+
+        days_remaining = (resets - now).total_seconds() / 86400
+        if projected >= 100:
+            # Will run out before reset
+            secs_until_empty = (total_secs * elapsed_secs / max(used_pct, 0.01)) - elapsed_secs
+            # Alternatively: at current burn rate, time to 100%
+            burn_rate = used_pct / elapsed_secs  # % per second
+            if burn_rate > 0:
+                secs_to_full = (100 - used_pct) / burn_rate
+                days_to_full = secs_to_full / 86400
+                if days_to_full < 1:
+                    hrs = int(secs_to_full / 3600)
+                    return f"    ⚠️  Runs out in ~{hrs}h"
+                else:
+                    return f"    ⚠️  Runs out in ~{days_to_full:.1f}d"
+            return "    ⚠️  On pace to exceed limit"
+        elif ratio > 1.3:
+            return f"    📈  High usage — projected {int(projected)}% by reset"
+        elif ratio < 0.5:
+            return f"    💤  Underutilising ({int(projected)}% projected)"
+        else:
+            return f"    ✅  On track ({int(projected)}% projected)"
+    except Exception:
+        return ""
