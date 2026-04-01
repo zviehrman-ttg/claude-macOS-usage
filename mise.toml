@@ -1,0 +1,13 @@
+[tasks.usage]
+description = "Launch Claude Usage Monitor menu bar app"
+dir = "{{config_root}}"
+run = """
+pkill -f ClaudeUsageMonitor || true
+sleep 0.5
+if [ ClaudeUsageMonitor.swift -nt ClaudeUsageMonitor ]; then
+  echo "Rebuilding Swift host..."
+  swiftc ClaudeUsageMonitor.swift -o ClaudeUsageMonitor -framework Cocoa 2>&1 | grep -v DeprecatedDeclaration || true
+fi
+./ClaudeUsageMonitor &
+echo "Claude Usage Monitor started (PID $!)"
+"""
