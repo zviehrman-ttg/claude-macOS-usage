@@ -178,7 +178,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if item.type == "separator" {
                     menu.addItem(NSMenuItem.separator())
                 } else {
-                    let menuItem = NSMenuItem(title: item.title ?? "", action: nil, keyEquivalent: "")
+                    let menuItem = NSMenuItem(title: item.title ?? "", action: #selector(noop), keyEquivalent: "")
+                    menuItem.target = self
                     menu.addItem(menuItem)
                 }
             }
@@ -326,6 +327,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.applyState(state)
         }
     }
+
+    @objc func noop() {}
 
     @objc func quitApp() {
         NSApp.terminate(nil)
