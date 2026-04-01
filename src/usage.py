@@ -11,6 +11,54 @@ from .auth import _session_headers
 from .config import CLI_STATS_PATH, CLAUDE_AI_API
 
 
+def _plural(n: int, unit: str) -> str:
+    return f"{n} {unit}" if n == 1 else f"{n} {unit}s"
+
+
+def _format_duration(total_seconds: int) -> str:
+    """Format a duration in seconds as readable days/hours/minutes."""
+    if total_seconds <= 0:
+        return "now"
+
+    total_minutes = max(1, (total_seconds + 59) // 60)
+    days, rem_minutes = divmod(total_minutes, 60 * 24)
+    hours, minutes = divmod(rem_minutes, 60)
+
+    if days > 0:
+        return f"{_plural(days, 'day')}, {_plural(hours, 'hour')}"
+    if hours > 0:
+        return f"{_plural(hours, 'hour')}, {_plural(minutes, 'minute')}"
+    return _plural(minutes, "minute")
+
+
+def _format_absolute_time(dt: datetime) -> str:
+    """Format a local datetime as 'Fri Apr 4, 2:00 PM'."""
+    clock = dt.strftime("%I:%M %p").lstrip("0")
+    return f"{dt.strftime('%a %b')} {dt.day}, {clock}"
+
+
+def format_reset_time(reset_str):
+    """Format a reset timestamp as relative duration and local wall-clock time."""
+    if not reset_str:
+        return ""
+
+    try:
+        if isinstance(reset_str, (int, float)):
+            dt = datetime.fromtimestamp(reset_str / 1000 if reset_str > 1e12 else reset_str).astimezone()
+        else:
+            dt = datetime.fromisoformat(str(reset_str).replace("Z", "+00:00")).astimezone()
+
+        now = datetime.now(dt.tzinfo)
+        diff = dt - now
+        seconds = int(diff.total_seconds())
+        if seconds <= 0:
+            return "now"
+
+        return f"in {_format_duration(seconds)} ({_format_absolute_time(dt)})"
+    except (ValueError, TypeError, OSError):
+        return str(reset_str)
+
+
 def fetch_claude_ai_usage(session_key, org_id):
     """Fetch live usage data from claude.ai internal API.
 
@@ -64,19 +112,19 @@ def _parse_usage_response(data):
     fh = data.get("five_hour")
     if isinstance(fh, dict):
         result["session"]["percent"] = int(fh.get("utilization", 0))
-        result["session"]["reset_at"] = _format_reset_time(fh.get("resets_at"))
+        result["session"]["reset_at"] = format_reset_time(fh.get("resets_at"))
         result["session"]["resets_at_iso"] = fh.get("resets_at", "")
 
     sd = data.get("seven_day")
     if isinstance(sd, dict):
         result["weekly_all"]["percent"] = int(sd.get("utilization", 0))
-        result["weekly_all"]["reset_at"] = _format_reset_time(sd.get("resets_at"))
+        result["weekly_all"]["reset_at"] = format_reset_time(sd.get("resets_at"))
         result["weekly_all"]["resets_at_iso"] = sd.get("resets_at", "")
 
     sds = data.get("seven_day_sonnet")
     if isinstance(sds, dict):
         result["weekly_sonnet"]["percent"] = int(sds.get("utilization", 0))
-        result["weekly_sonnet"]["reset_at"] = _format_reset_time(sds.get("resets_at"))
+        result["weekly_sonnet"]["reset_at"] = format_reset_time(sds.get("resets_at"))
         result["weekly_sonnet"]["resets_at_iso"] = sds.get("resets_at", "")
 
     has_token_data = isinstance(fh, dict) or isinstance(sd, dict) or isinstance(sds, dict)
@@ -118,31 +166,6 @@ def _parse_usage_response(data):
         result["plan_mode"] = "unknown"
 
     return result
-
-
-def _format_reset_time(reset_str):
-    """Format a reset timestamp into a human-readable string."""
-    if not reset_str:
-        return ""
-    try:
-        if isinstance(reset_str, (int, float)):
-            dt = datetime.fromtimestamp(reset_str / 1000 if reset_str > 1e12 else reset_str)
-        else:
-            dt = datetime.fromisoformat(str(reset_str).replace("Z", "+00:00"))
-            dt = dt.astimezone()
-        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-        diff = dt - now
-        if diff.total_seconds() < 0:
-            return "now"
-        if diff.days > 0:
-            return dt.strftime("%a %b %d %I:%M %p")
-        hours = diff.seconds // 3600
-        mins = (diff.seconds % 3600) // 60
-        if hours > 0:
-            return f"in {hours}h {mins}m"
-        return f"in {mins}m"
-    except (ValueError, TypeError, OSError):
-        return str(reset_str)
 
 
 def get_cli_stats():
@@ -209,18 +232,22 @@ def get_cli_stats():
 def get_reset_countdown():
     """Calculate time until daily and weekly resets."""
     now = datetime.now()
-    daily_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+    daily_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     daily_diff = daily_reset - now
-    daily_hours = daily_diff.seconds // 3600
-    daily_mins = (daily_diff.seconds % 3600) // 60
 
     days_until_monday = (7 - now.weekday()) % 7 or 7
-    weekly_reset = (now + timedelta(days=days_until_monday)).replace(hour=0, minute=0, second=0)
+    weekly_reset = (now + timedelta(days=days_until_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
     weekly_diff = weekly_reset - now
 
     return {
-        "daily": f"{daily_hours}h {daily_mins}m",
-        "weekly": f"{weekly_diff.days}d {weekly_diff.seconds // 3600}h",
+        "daily": (
+            f"{_format_duration(int(daily_diff.total_seconds()))} "
+            f"({_format_absolute_time(daily_reset)})"
+        ),
+        "weekly": (
+            f"{_format_duration(int(weekly_diff.total_seconds()))} "
+            f"({_format_absolute_time(weekly_reset)})"
+        ),
     }
 
 

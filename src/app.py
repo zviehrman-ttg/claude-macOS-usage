@@ -33,6 +33,7 @@ from .auth import (
 from .config import APP_NAME, AUTO_REFRESH_INTERVAL, TIER_MAP, TIERS
 from .usage import (
     build_bar,
+    format_reset_time as usage_format_reset,
     predict_pace,
     fetch_claude_ai_usage,
     format_tokens,
@@ -265,7 +266,7 @@ class ClaudeUsageApp(rumps.App):
                 if pace:
                     self.menu.add(rumps.MenuItem(f"{pace}  [{key}]", callback=_noop))
                 if resets_at:
-                    self.menu.add(rumps.MenuItem(f"    Resets {resets_at[:16].replace('T',' ')}", callback=_noop))
+                    self.menu.add(rumps.MenuItem(f"    Resets {usage_format_reset(resets_at)}", callback=_noop))
                 self.menu.add(rumps.separator)
 
             # Extra (add-on) credits

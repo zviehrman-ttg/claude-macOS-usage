@@ -34,6 +34,7 @@ from src.auth import (
 from src.config import TIER_MAP, TIERS
 from src.usage import (
     build_bar,
+    format_reset_time as usage_format_reset,
     predict_pace,
     fetch_claude_ai_usage,
     format_tokens,
@@ -138,7 +139,7 @@ def _build_state(tier="pro", username=None, org_id=None, has_session=False,
             if pace:
                 menu_items.append({"type": "item", "title": f"{pace}  [{key}]"})
             if resets_at:
-                menu_items.append({"type": "item", "title": f"    Resets {resets_at[:16].replace('T',' ')}"})
+                menu_items.append({"type": "item", "title": f"    Resets {usage_format_reset(resets_at)}"})
             menu_items.append({"type": "separator"})
 
         # Extra (add-on) credits

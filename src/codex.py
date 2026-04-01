@@ -9,7 +9,7 @@ Returns None gracefully if Codex is not installed / auth missing.
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import os
@@ -198,11 +198,23 @@ def get_codex_stats() -> dict | None:
 
 
 def format_reset_time(seconds: int) -> str:
-    """Format seconds-until-reset as human-readable string."""
+    """Format seconds-until-reset as duration plus absolute local time."""
     if seconds <= 0:
         return "now"
-    h = seconds // 3600
-    m = (seconds % 3600) // 60
-    if h > 0:
-        return f"{h}h {m}m"
-    return f"{m}m"
+
+    total_minutes = max(1, (seconds + 59) // 60)
+    days, rem_minutes = divmod(total_minutes, 60 * 24)
+    hours, minutes = divmod(rem_minutes, 60)
+
+    if days > 0:
+        duration = f"{days} day{'s' if days != 1 else ''}, {hours} hour{'s' if hours != 1 else ''}"
+    elif hours > 0:
+        duration = f"{hours} hour{'s' if hours != 1 else ''}, {minutes} minute{'s' if minutes != 1 else ''}"
+    else:
+        duration = f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+    reset_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    local = reset_at.astimezone()
+    clock = local.strftime("%I:%M %p").lstrip("0")
+    absolute = f"{local.strftime('%a %b')} {local.day}, {clock}"
+    return f"{duration} ({absolute})"
