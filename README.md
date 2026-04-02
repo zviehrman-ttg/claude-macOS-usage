@@ -14,12 +14,14 @@ A macOS menu bar app that tracks your Claude AI usage limits in real time. See s
 ## Features
 
 - **Real-time usage monitoring** -- View current session (5-hour window), weekly (all models), and weekly (Sonnet-only) utilization as progress bars directly from your menu bar.
+- **Codex usage monitoring** -- Track Codex live rate-limit windows and local token usage alongside Claude.
 - **Claude Code CLI stats** -- Messages sent, sessions started, tool calls made, and token usage broken down by model, for today and this week.
 - **Auto-detect plan tier** -- Reads your Claude Code CLI credentials from macOS Keychain to determine whether you are on Free, Pro, Max 5x, or Max 20x.
 - **Chrome cookie auto-extraction** -- Automatically extracts your `sessionKey` from Chrome cookies (with Keychain permission) so you can connect without any manual steps.
 - **Manual session cookie connection** -- If auto-extraction is unavailable, paste your `sessionKey` from browser DevTools.
 - **Extra usage billing display** -- Shows how much of your extra usage budget has been consumed (for plans that support it).
 - **Reset countdown timers** -- See exactly when your session and weekly limits reset.
+- **Compact provider submenus** -- Top-level menu stays short with at-a-glance summaries (usage + reset countdown), with full details under Claude/Codex submenus.
 - **Color-coded status icon** -- The menu bar icon changes color based on your current session usage: green (< 50%), yellow (50-80%), orange (> 80%).
 - **Secure credential storage** -- All session keys are stored in the macOS Keychain. Nothing is sent to any server other than `claude.ai`.
 - **Auto-refresh** -- Usage data updates every 5 minutes in the background.
@@ -78,6 +80,14 @@ pip install -r requirements.txt
 python claude_usage.py
 ```
 
+### Run with `mise` task
+
+If you use `mise`, run the Swift menu bar host with:
+
+```bash
+mise r usage
+```
+
 ## Usage
 
 Once launched, the app lives in your macOS menu bar. Click the icon to open the dropdown menu.
@@ -86,11 +96,10 @@ Once launched, the app lives in your macOS menu bar. Click the icon to open the 
 
 | Section | Description |
 |---|---|
-| **Header** | Your username, plan tier, and price. A checkmark indicates Claude CLI credentials were detected. |
-| **Usage limits** | Progress bars for session, weekly (all models), and weekly (Sonnet-only) utilization, with reset countdowns. |
-| **Extra usage** | Credits consumed vs. monthly limit (shown only if extra usage is enabled on your plan). |
-| **Claude Code activity** | Messages, sessions, and tool calls for today and this week. Token breakdown by model. |
-| **Actions** | Refresh Now, open claude.ai usage settings, change tier, connect/disconnect session. |
+| **Header** | Your Claude account + plan and Codex account + plan. |
+| **Claude / Codex rows** | Compact summaries with status color, current usage %, and `reset in ...` countdown. |
+| **Provider submenus** | Full breakdown for each provider: progress bars, pace hints, reset times, and token-by-model details. |
+| **More submenu** | Refresh, settings, org switching, and session connect/disconnect actions. |
 
 ### Connecting your session
 
@@ -110,17 +119,19 @@ If automatic detection picks the wrong tier, click **Tier** in the menu and sele
 ```
                           macOS Menu Bar
                                |
-                        ClaudeUsageApp (rumps)
-                       /        |         \
-              CLI Keychain   CLI Stats   claude.ai API
-              (tier, user)  (stats-cache) (live usage)
+                 Swift Host (ClaudeUsageMonitor)
+                               |
+                           backend.py
+                     /          |           \
+            CLI Keychain     CLI Stats    APIs
+            (tier, user)   (local usage)  (claude.ai + Codex)
 ```
 
 1. **On launch**, the app reads Claude Code CLI credentials from the macOS Keychain (`Claude Code-credentials`) to detect your plan tier and username.
-2. **CLI stats** are read from `~/.claude/stats-cache.json`, a file maintained by the Claude Code CLI. This provides message counts, session counts, tool call counts, and token usage by model.
-3. **Live usage data** is fetched from the `claude.ai/api/organizations/{org_id}/usage` endpoint using a session cookie. This returns utilization percentages for the 5-hour session window, 7-day rolling window (all models), and 7-day rolling window (Sonnet only).
-4. **Every 5 minutes**, the app refreshes both CLI stats and live usage data in a background thread.
-5. **The menu bar icon** updates its color based on current session utilization.
+2. **CLI stats** are read from `~/.claude/stats-cache.json` and local project logs for token/message trends.
+3. **Live Claude usage** is fetched from `claude.ai/api/organizations/{org_id}/usage` using your session cookie.
+4. **Live Codex usage** is fetched from `chatgpt.com/backend-api/wham/usage` via local Codex auth tokens.
+5. **Every 5 minutes**, the app refreshes local stats and live usage; compact menu summaries update with usage and reset countdowns.
 
 ## Security
 
