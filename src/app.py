@@ -185,6 +185,57 @@ class ClaudeUsageApp(rumps.App):
 
     # --- Menu ---
 
+    def _claude_summary_label(self):
+        """Top-level compact summary for the Claude submenu."""
+        pct = None
+        suffix = "no live data"
+        if self.live_usage:
+            plan_mode = self.live_usage.get("plan_mode", "token_cap")
+            if plan_mode == "spend_cap" and self.live_usage.get("spend"):
+                pct = self.live_usage["spend"]["percent"]
+                suffix = f"{pct}% spend"
+            elif plan_mode == "token_cap":
+                pct = self.live_usage["session"]["percent"]
+                suffix = f"{pct}%"
+            else:
+                suffix = "usage unavailable"
+        elif self.has_session:
+            suffix = "loading..."
+        elif self.claude_oauth_usage:
+            fh = self.claude_oauth_usage.get("five_hour") or {}
+            if fh:
+                pct = int(fh.get("utilization", 0))
+                suffix = f"{pct}%"
+
+        if pct is None:
+            dot = "\U0001F535"  # blue
+        elif pct > 80:
+            dot = "\U0001F7E0"  # orange
+        elif pct > 50:
+            dot = "\U0001F7E1"  # yellow
+        else:
+            dot = "\U0001F7E2"  # green
+        return f"{dot} Claude \u00B7 {suffix}"
+
+    def _codex_summary_label(self):
+        """Top-level compact summary for the Codex submenu."""
+        live = self.codex_live
+        if live:
+            plan = live.get("plan_label") or live.get("plan_name", "Unknown")
+            pct = live.get("primary_pct")
+            if live.get("limit_reached"):
+                dot = "\U0001F534"  # red
+            elif pct > 80:
+                dot = "\U0001F7E0"  # orange
+            elif pct > 50:
+                dot = "\U0001F7E1"  # yellow
+            else:
+                dot = "\U0001F7E2"  # green
+            return f"{dot} Codex \u00B7 {pct}% ({plan})"
+        if self.codex_stats:
+            return "\U0001F535 Codex \u00B7 local stats only"
+        return "\u26AA Codex \u00B7 not connected"
+
     def _build_menu(self):
         self.menu.clear()
 
@@ -205,8 +256,11 @@ class ClaudeUsageApp(rumps.App):
         self.menu.add(rumps.MenuItem(header, callback=_noop))
         self.menu.add(rumps.separator)
 
-        # ---- Claude Usage header ----
-        self.menu.add(rumps.MenuItem("── Claude ──", callback=_noop))
+        # ---- Provider submenus (compact top-level UI) ----
+        claude_menu = rumps.MenuItem(self._claude_summary_label())
+        codex_menu = rumps.MenuItem(self._codex_summary_label())
+        self.menu.add(claude_menu)
+        self.menu.add(codex_menu)
 
         # ---- Live usage (from claude.ai session) ----
         if self.live_usage:
@@ -218,23 +272,23 @@ class ClaudeUsageApp(rumps.App):
                 amount = spend["amount"]
                 limit = spend["limit"]
                 reset = spend["reset_at"]
-                self.menu.add(rumps.MenuItem("  Monthly spend", callback=_noop))
-                self.menu.add(rumps.MenuItem(
+                claude_menu.add(rumps.MenuItem("  Monthly spend", callback=_noop))
+                claude_menu.add(rumps.MenuItem(
                     f"    {build_bar(pct)}  {pct}% used",
                     callback=_noop,
                 ))
-                self.menu.add(rumps.MenuItem(
+                claude_menu.add(rumps.MenuItem(
                     f"    ${amount:.2f} of ${limit:.2f} spent",
                     callback=_noop,
                 ))
                 if reset:
-                    self.menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
-                self.menu.add(rumps.separator)
+                    claude_menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
+                claude_menu.add(rumps.separator)
 
             elif plan_mode == "unknown":
-                self.menu.add(rumps.MenuItem("  Usage data unavailable for this plan", callback=_noop))
-                self.menu.add(rumps.MenuItem("  See claude.ai/settings/usage", callback=_noop))
-                self.menu.add(rumps.separator)
+                claude_menu.add(rumps.MenuItem("  Usage data unavailable for this plan", callback=_noop))
+                claude_menu.add(rumps.MenuItem("  See claude.ai/settings/usage", callback=_noop))
+                claude_menu.add(rumps.separator)
 
             else:
                 # token_cap: Pro / Max plans
@@ -247,20 +301,20 @@ class ClaudeUsageApp(rumps.App):
                     window_h = 5 if key == "session" else 168
                     pace = predict_pace(pct, resets_at_iso, window_h)
 
-                    self.menu.add(rumps.MenuItem(f"  {label}", callback=_noop))
-                    self.menu.add(rumps.MenuItem(
+                    claude_menu.add(rumps.MenuItem(f"  {label}", callback=_noop))
+                    claude_menu.add(rumps.MenuItem(
                         f"    {build_bar(pct)}  {pct}% used",
                         callback=_noop,
                     ))
                     if pace:
-                        self.menu.add(rumps.MenuItem(f"{pace}  [{key}]", callback=_noop))
+                        claude_menu.add(rumps.MenuItem(f"{pace}  [{key}]", callback=_noop))
                     if reset:
-                        self.menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
-                    self.menu.add(rumps.separator)
+                        claude_menu.add(rumps.MenuItem(f"    Resets {reset}", callback=_noop))
+                    claude_menu.add(rumps.separator)
 
         elif self.has_session:
-            self.menu.add(rumps.MenuItem("  Loading live usage...", callback=_noop))
-            self.menu.add(rumps.separator)
+            claude_menu.add(rumps.MenuItem("  Loading live usage...", callback=_noop))
+            claude_menu.add(rumps.separator)
 
         elif self.claude_oauth_usage:
             # OAuth usage from CLI token (no session cookie needed)
@@ -279,16 +333,16 @@ class ClaudeUsageApp(rumps.App):
                 resets_at = bucket.get("resets_at", "")
                 window_h = 5 if key == "five_hour" else 168
                 pace = predict_pace(pct, resets_at, window_h)
-                self.menu.add(rumps.MenuItem(label, callback=_noop))
-                self.menu.add(rumps.MenuItem(
+                claude_menu.add(rumps.MenuItem(label, callback=_noop))
+                claude_menu.add(rumps.MenuItem(
                     f"    {build_bar(int(pct))}  {int(pct)}% used",
                     callback=_noop,
                 ))
                 if pace:
-                    self.menu.add(rumps.MenuItem(f"{pace}  [{key}]", callback=_noop))
+                    claude_menu.add(rumps.MenuItem(f"{pace}  [{key}]", callback=_noop))
                 if resets_at:
-                    self.menu.add(rumps.MenuItem(f"    Resets {usage_format_reset(resets_at)}", callback=_noop))
-                self.menu.add(rumps.separator)
+                    claude_menu.add(rumps.MenuItem(f"    Resets {usage_format_reset(resets_at)}", callback=_noop))
+                claude_menu.add(rumps.separator)
 
             # Extra (add-on) credits
             extra = ou.get("extra_usage") or {}
@@ -297,61 +351,52 @@ class ClaudeUsageApp(rumps.App):
                 limit = int(extra.get("monthly_limit", 0))
                 pct = min(int(extra.get("utilization", 0)), 100)
                 warn = "  ⚠️ Add-on credits" if pct >= 100 else "  Add-on credits"
-                self.menu.add(rumps.MenuItem(warn, callback=_noop))
-                self.menu.add(rumps.MenuItem(
+                claude_menu.add(rumps.MenuItem(warn, callback=_noop))
+                claude_menu.add(rumps.MenuItem(
                     f"    {build_bar(pct)}  {used}/{limit} used ({pct}%)",
                     callback=_noop,
                 ))
-                self.menu.add(rumps.separator)
+                claude_menu.add(rumps.separator)
         else:
             # No session — show resets based on time
-            self.menu.add(rumps.MenuItem("  Usage limits (connect for live data)", callback=_noop))
-            self.menu.add(rumps.separator)
-            self.menu.add(rumps.MenuItem(f"    Daily resets in:  {resets['daily']}", callback=_noop))
-            self.menu.add(rumps.MenuItem(f"    Weekly resets in: {resets['weekly']}", callback=_noop))
-            self.menu.add(rumps.separator)
+            claude_menu.add(rumps.MenuItem("  Usage limits (connect for live data)", callback=_noop))
+            claude_menu.add(rumps.separator)
+            claude_menu.add(rumps.MenuItem(f"    Daily resets in:  {resets['daily']}", callback=_noop))
+            claude_menu.add(rumps.MenuItem(f"    Weekly resets in: {resets['weekly']}", callback=_noop))
+            claude_menu.add(rumps.separator)
 
         # ---- Claude Code Token Stats (from ~/.claude/projects jsonl files) ----
         token_stats = self.claude_code_stats or self.cli_stats
         if token_stats:
             if token_stats.get("today_tokens_by_model"):
-                self.menu.add(rumps.separator)
-                self.menu.add(rumps.MenuItem("    Tokens today:", callback=_noop))
+                claude_menu.add(rumps.separator)
+                claude_menu.add(rumps.MenuItem("    Tokens today:", callback=_noop))
                 for model, count in sorted(
                     token_stats["today_tokens_by_model"].items(),
                     key=lambda x: -x[1],
                 ):
                     name = shorten_model_name(model)
-                    self.menu.add(rumps.MenuItem(
+                    claude_menu.add(rumps.MenuItem(
                         f"      {name}: {format_tokens(count)}",
                         callback=_noop,
                     ))
 
             if token_stats.get("week_tokens_by_model"):
-                self.menu.add(rumps.separator)
-                self.menu.add(rumps.MenuItem("    Tokens this week:", callback=_noop))
+                claude_menu.add(rumps.separator)
+                claude_menu.add(rumps.MenuItem("    Tokens this week:", callback=_noop))
                 for model, count in sorted(
                     token_stats["week_tokens_by_model"].items(),
                     key=lambda x: -x[1],
                 ):
                     name = shorten_model_name(model)
-                    self.menu.add(rumps.MenuItem(
+                    claude_menu.add(rumps.MenuItem(
                         f"      {name}: {format_tokens(count)}",
                         callback=_noop,
                     ))
 
         # ---- Codex Usage ----
         if self.codex_stats or self.codex_live:
-            self.menu.add(rumps.separator)
             live = self.codex_live
-
-            # Header: plan name
-            if live:
-                codex_plan = live.get("plan_label") or live.get("plan_name", "Unknown")
-                header = f"── Codex ({codex_plan}) ──"
-            else:
-                header = "── Codex ──"
-            self.menu.add(rumps.MenuItem(header, callback=_noop))
 
             # Live rate-limit windows
             if live:
@@ -359,13 +404,13 @@ class ClaudeUsageApp(rumps.App):
                 p_h = live["primary_window_h"]
                 p_reset = codex_format_reset(live["primary_reset_s"])
                 p_pace = predict_pace(p_pct, live.get("primary_resets_at"), p_h)
-                self.menu.add(rumps.MenuItem(
+                codex_menu.add(rumps.MenuItem(
                     f"  {build_bar(p_pct)}  {p_pct}% used ({p_h}h window)",
                     callback=_noop,
                 ))
                 if p_pace:
-                    self.menu.add(rumps.MenuItem(p_pace, callback=_noop))
-                self.menu.add(rumps.MenuItem(f"    Resets in {p_reset}", callback=_noop))
+                    codex_menu.add(rumps.MenuItem(p_pace, callback=_noop))
+                codex_menu.add(rumps.MenuItem(f"    Resets in {p_reset}", callback=_noop))
 
                 s_pct = live["secondary_pct"]
                 if s_pct > 0 or live["secondary_window_h"] > 0:
@@ -373,35 +418,37 @@ class ClaudeUsageApp(rumps.App):
                     s_reset = codex_format_reset(live["secondary_reset_s"])
                     s_resets_at = live.get("secondary_resets_at")
                     s_pace = predict_pace(s_pct, s_resets_at, s_h)
-                    self.menu.add(rumps.MenuItem(
+                    codex_menu.add(rumps.MenuItem(
                         f"  {build_bar(s_pct)}  {s_pct}% used ({s_h}h window)",
                         callback=_noop,
                     ))
                     if s_pace:
-                        self.menu.add(rumps.MenuItem(s_pace, callback=_noop))
-                    self.menu.add(rumps.MenuItem(f"    Resets in {s_reset}", callback=_noop))
+                        codex_menu.add(rumps.MenuItem(s_pace, callback=_noop))
+                    codex_menu.add(rumps.MenuItem(f"    Resets in {s_reset}", callback=_noop))
             else:
-                self.menu.add(rumps.MenuItem("  (not connected)", callback=_noop))
+                codex_menu.add(rumps.MenuItem("  (not connected)", callback=_noop))
 
             # Local token history
             if self.codex_stats:
                 stats = self.codex_stats
                 if stats["today_tokens_by_model"]:
-                    self.menu.add(rumps.separator)
-                    self.menu.add(rumps.MenuItem("    Tokens today:", callback=_noop))
+                    codex_menu.add(rumps.separator)
+                    codex_menu.add(rumps.MenuItem("    Tokens today:", callback=_noop))
                     for model, count in stats["today_tokens_by_model"].items():
-                        self.menu.add(rumps.MenuItem(
+                        codex_menu.add(rumps.MenuItem(
                             f"      {model}: {format_tokens(count)}",
                             callback=_noop,
                         ))
                 if stats["week_tokens_by_model"]:
-                    self.menu.add(rumps.separator)
-                    self.menu.add(rumps.MenuItem("    Tokens this week:", callback=_noop))
+                    codex_menu.add(rumps.separator)
+                    codex_menu.add(rumps.MenuItem("    Tokens this week:", callback=_noop))
                     for model, count in stats["week_tokens_by_model"].items():
-                        self.menu.add(rumps.MenuItem(
+                        codex_menu.add(rumps.MenuItem(
                             f"      {model}: {format_tokens(count)}",
                             callback=_noop,
                         ))
+        else:
+            codex_menu.add(rumps.MenuItem("  No Codex data yet", callback=_noop))
 
         self.menu.add(rumps.separator)
 

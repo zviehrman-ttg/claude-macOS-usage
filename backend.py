@@ -74,6 +74,115 @@ def _format_codex_identity(codex_live):
     return "Codex"
 
 
+def _claude_summary_label(has_session, live_usage, claude_oauth_usage):
+    """Compact top-level summary label for Claude submenu."""
+    pct = None
+    suffix = "no live data"
+    if live_usage:
+        plan_mode = live_usage.get("plan_mode", "token_cap")
+        if plan_mode == "spend_cap" and live_usage.get("spend"):
+            pct = live_usage["spend"]["percent"]
+            suffix = f"{pct}% spend"
+        elif plan_mode == "token_cap":
+            pct = live_usage["session"]["percent"]
+            suffix = f"{pct}%"
+        else:
+            suffix = "usage unavailable"
+    elif has_session:
+        suffix = "loading..."
+    elif claude_oauth_usage:
+        fh = claude_oauth_usage.get("five_hour") or {}
+        if fh:
+            pct = int(fh.get("utilization", 0))
+            suffix = f"{pct}%"
+
+    if pct is None:
+        dot = "\U0001F535"  # blue
+    elif pct > 80:
+        dot = "\U0001F7E0"  # orange
+    elif pct > 50:
+        dot = "\U0001F7E1"  # yellow
+    else:
+        dot = "\U0001F7E2"  # green
+    return f"{dot} Claude \u00B7 {suffix}"
+
+
+def _codex_summary_label(codex_live, codex_stats):
+    """Compact top-level summary label for Codex submenu."""
+    if codex_live:
+        pct = codex_live.get("primary_pct")
+        if codex_live.get("limit_reached"):
+            dot = "\U0001F534"  # red
+        elif pct > 80:
+            dot = "\U0001F7E0"  # orange
+        elif pct > 50:
+            dot = "\U0001F7E1"  # yellow
+        else:
+            dot = "\U0001F7E2"  # green
+        return f"{dot} Codex \u00B7 {pct}%"
+    if codex_stats:
+        return "\U0001F535 Codex \u00B7 local stats only"
+    return "\u26AA Codex \u00B7 not connected"
+
+
+def _trim_edge_separators(items):
+    """Remove leading/trailing separators from a menu item list."""
+    trimmed = list(items)
+    while trimmed and trimmed[0].get("type") == "separator":
+        trimmed = trimmed[1:]
+    while trimmed and trimmed[-1].get("type") == "separator":
+        trimmed = trimmed[:-1]
+    return trimmed
+
+
+def _compact_provider_menu(menu_items, has_session, live_usage, claude_oauth_usage, codex_live, codex_stats):
+    """Convert flat Claude/Codex sections into compact provider submenus."""
+    if len(menu_items) < 2:
+        return menu_items
+
+    claude_idx = -1
+    codex_idx = -1
+    for i, item in enumerate(menu_items):
+        if item.get("type") != "item":
+            continue
+        title = item.get("title") or ""
+        if title.startswith("── Claude"):
+            claude_idx = i
+        elif title.startswith("── Codex"):
+            codex_idx = i
+
+    if claude_idx == -1:
+        return menu_items
+
+    prelude = menu_items[:2]  # account header + separator
+    claude_end = codex_idx if codex_idx != -1 else len(menu_items)
+    claude_items = _trim_edge_separators(menu_items[claude_idx + 1:claude_end])
+
+    codex_items = []
+    if codex_idx != -1:
+        codex_end = len(menu_items) - 1 if menu_items and menu_items[-1].get("type") == "separator" else len(menu_items)
+        codex_items = _trim_edge_separators(menu_items[codex_idx + 1:codex_end])
+
+    if not claude_items:
+        claude_items = [{"type": "item", "title": "  No Claude data yet"}]
+    if not codex_items:
+        codex_items = [{"type": "item", "title": "  No Codex data yet"}]
+
+    compact = list(prelude)
+    compact.append({
+        "type": "submenu",
+        "title": _claude_summary_label(has_session, live_usage, claude_oauth_usage),
+        "children": claude_items,
+    })
+    compact.append({
+        "type": "submenu",
+        "title": _codex_summary_label(codex_live, codex_stats),
+        "children": codex_items,
+    })
+    compact.append({"type": "separator"})
+    return compact
+
+
 def _build_state(tier="pro", username=None, org_id=None, has_session=False,
                  has_cli_creds=False, available_orgs=None, live_usage=None,
                  claude_oauth_usage=None, cli_stats=None, claude_code_stats=None,
@@ -243,6 +352,14 @@ def _build_state(tier="pro", username=None, org_id=None, has_session=False,
                     menu_items.append({"type": "item", "title": f"      {model}: {format_tokens(count)}"})
 
     menu_items.append({"type": "separator"})
+    menu_items = _compact_provider_menu(
+        menu_items,
+        has_session=has_session,
+        live_usage=live_usage,
+        claude_oauth_usage=claude_oauth_usage,
+        codex_live=codex_live,
+        codex_stats=codex_stats,
+    )
 
     # ---- Title icon (dual dots) ----
     # Claude dot

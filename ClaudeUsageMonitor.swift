@@ -30,6 +30,7 @@ struct BackendState: Codable {
 struct MenuItem: Codable {
     let type: String
     let title: String?
+    let children: [MenuItem]?
 }
 
 // MARK: - App Delegate
@@ -153,6 +154,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - State Management
 
+    func appendMenuItem(_ item: MenuItem, to menu: NSMenu) {
+        if item.type == "separator" {
+            menu.addItem(NSMenuItem.separator())
+            return
+        }
+
+        if item.type == "submenu" {
+            let parent = NSMenuItem(title: item.title ?? "", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            for child in item.children ?? [] {
+                appendMenuItem(child, to: submenu)
+            }
+            parent.submenu = submenu
+            menu.addItem(parent)
+            return
+        }
+
+        let menuItem = NSMenuItem(title: item.title ?? "", action: #selector(noop), keyEquivalent: "")
+        menuItem.target = self
+        menu.addItem(menuItem)
+    }
+
     func applyState(_ state: BackendState) {
         // Update title icon
         if let icon = state.titleIcon {
@@ -175,31 +198,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let items = state.menuItems {
             for item in items {
-                if item.type == "separator" {
-                    menu.addItem(NSMenuItem.separator())
-                } else {
-                    let menuItem = NSMenuItem(title: item.title ?? "", action: #selector(noop), keyEquivalent: "")
-                    menuItem.target = self
-                    menu.addItem(menuItem)
-                }
+                appendMenuItem(item, to: menu)
             }
         }
 
-        // Add last-updated timestamp
+        menu.addItem(NSMenuItem.separator())
+
+        // Collapsed actions under a single submenu to reduce visual noise
+        let moreItem = NSMenuItem(title: "More", action: nil, keyEquivalent: "")
+        let moreMenu = NSMenu()
+
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         let tsItem = NSMenuItem(title: "Last updated: \(formatter.string(from: Date()))", action: nil, keyEquivalent: "")
-        menu.addItem(tsItem)
-        menu.addItem(NSMenuItem.separator())
+        moreMenu.addItem(tsItem)
+        moreMenu.addItem(NSMenuItem.separator())
 
-        // Action items
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshData), keyEquivalent: "r")
         refreshItem.target = self
-        menu.addItem(refreshItem)
+        moreMenu.addItem(refreshItem)
 
         let settingsItem = NSMenuItem(title: "Open claude.ai/settings/usage", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
-        menu.addItem(settingsItem)
+        moreMenu.addItem(settingsItem)
 
         // Org switcher
         if availableOrgs.count > 1 {
@@ -215,19 +236,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let switchItem = NSMenuItem(title: "Switch Organization", action: nil, keyEquivalent: "")
             switchItem.submenu = switchMenu
-            menu.addItem(switchItem)
+            moreMenu.addItem(switchItem)
         }
 
         // Session management
         if hasSession {
             let disconnectItem = NSMenuItem(title: "Disconnect Session", action: #selector(disconnectSession), keyEquivalent: "")
             disconnectItem.target = self
-            menu.addItem(disconnectItem)
+            moreMenu.addItem(disconnectItem)
         } else {
             let connectItem = NSMenuItem(title: "Connect claude.ai Session...", action: #selector(connectSession), keyEquivalent: "")
             connectItem.target = self
-            menu.addItem(connectItem)
+            moreMenu.addItem(connectItem)
         }
+
+        moreItem.submenu = moreMenu
+        menu.addItem(moreItem)
 
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
