@@ -110,6 +110,25 @@ The app tries to connect automatically on launch:
 
 Without a connected session the app still shows Claude Code CLI stats and estimated reset countdowns, but cannot display live utilization percentages.
 
+### Enabling Codex data
+
+Codex does not need manual setup inside this app. It is detected automatically from your local Codex files:
+
+- `~/.codex/auth.json` (for live Codex usage API calls)
+- `~/.codex/state_5.sqlite` (for local token history)
+
+To enable Codex in the menu:
+
+1. Sign in to Codex CLI with the account you want to track.
+2. Use Codex at least once so local usage history exists.
+3. Restart the menu app (`mise r usage`).
+
+Quick check:
+
+```bash
+ls -l ~/.codex/auth.json ~/.codex/state_5.sqlite
+```
+
 ### Changing your plan tier
 
 If automatic detection picks the wrong tier, click **Tier** in the menu and select the correct plan. This affects the estimated usage calculations when live data is unavailable.
