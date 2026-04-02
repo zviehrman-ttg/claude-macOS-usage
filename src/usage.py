@@ -32,9 +32,13 @@ def _format_duration(total_seconds: int) -> str:
 
 
 def _format_absolute_time(dt: datetime) -> str:
-    """Format a local datetime as 'Fri Apr 4, 2:00 PM'."""
+    """Format a local datetime as 'Fri Apr 4, 2:00 PM BST'."""
     clock = dt.strftime("%I:%M %p").lstrip("0")
-    return f"{dt.strftime('%a %b')} {dt.day}, {clock}"
+    tz = dt.strftime("%Z").strip()
+    if not tz:
+        offset = dt.strftime("%z").strip()
+        tz = f"UTC{offset[:3]}:{offset[3:]}" if offset else "local"
+    return f"{dt.strftime('%a %b')} {dt.day}, {clock} {tz}"
 
 
 def format_reset_time(reset_str):
@@ -231,7 +235,7 @@ def get_cli_stats():
 
 def get_reset_countdown():
     """Calculate time until daily and weekly resets."""
-    now = datetime.now()
+    now = datetime.now().astimezone()
     daily_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     daily_diff = daily_reset - now
 
@@ -331,6 +335,10 @@ def get_claude_code_token_stats():
 def predict_pace(used_pct: float, resets_at_iso: str | None, window_hours: int = 168) -> str:
     """Return a pace prediction string: on track / runs out early / underutilising."""
     if used_pct is None:
+        return ""
+    # Weekly windows are noisy right after reset; suppress pace hints
+    # until usage is meaningfully non-trivial.
+    if window_hours >= 24 and used_pct < 10:
         return ""
     try:
         from datetime import datetime, timezone

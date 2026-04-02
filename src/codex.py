@@ -233,5 +233,9 @@ def format_reset_time(seconds: int) -> str:
     reset_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
     local = reset_at.astimezone()
     clock = local.strftime("%I:%M %p").lstrip("0")
-    absolute = f"{local.strftime('%a %b')} {local.day}, {clock}"
+    tz = local.strftime("%Z").strip()
+    if not tz:
+        offset = local.strftime("%z").strip()
+        tz = f"UTC{offset[:3]}:{offset[3:]}" if offset else "local"
+    absolute = f"{local.strftime('%a %b')} {local.day}, {clock} {tz}"
     return f"{duration} ({absolute})"
