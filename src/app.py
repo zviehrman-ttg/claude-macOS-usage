@@ -61,6 +61,26 @@ def _noop(_):
     pass
 
 
+def _format_codex_identity(codex_live):
+    """Build a concise Codex identity label for the top header."""
+    if not codex_live:
+        return ""
+
+    plan = str(codex_live.get("plan_label") or codex_live.get("plan_name", "") or "").strip()
+    email = str(codex_live.get("email", "") or "").strip()
+    account = email.split("@", 1)[0] if "@" in email else email
+    if len(account) > 18:
+        account = account[:15] + "..."
+
+    if account and plan:
+        return f"{account} - {plan}"
+    if plan:
+        return f"Codex {plan}"
+    if account:
+        return account
+    return "Codex"
+
+
 class ClaudeUsageApp(rumps.App):
     def __init__(self):
         super().__init__(APP_NAME, title="\u2728", quit_button=None)
@@ -178,8 +198,9 @@ class ClaudeUsageApp(rumps.App):
             header = f"{self.username} - {tier_label}"
         else:
             header = tier_label
-        if self.has_cli_creds:
-            header += "  \u2713"  # checkmark
+        codex_identity = _format_codex_identity(self.codex_live)
+        if codex_identity:
+            header = f"{header} / {codex_identity}"
 
         self.menu.add(rumps.MenuItem(header, callback=_noop))
         self.menu.add(rumps.separator)
@@ -326,7 +347,8 @@ class ClaudeUsageApp(rumps.App):
 
             # Header: plan name
             if live:
-                header = f"── Codex ({live['plan_name']}) ──"
+                codex_plan = live.get("plan_label") or live.get("plan_name", "Unknown")
+                header = f"── Codex ({codex_plan}) ──"
             else:
                 header = "── Codex ──"
             self.menu.add(rumps.MenuItem(header, callback=_noop))

@@ -43,6 +43,22 @@ _PLAN_NAMES = {
     "guest": "Guest",
 }
 
+_PLAN_PRICES = {
+    "go": "$10/mo",
+    "plus": "$20/mo",
+    "pro": "$200/mo",
+}
+
+
+def _format_plan_label(plan_type: str) -> str:
+    """Return a display label for a plan, adding price when known."""
+    key = (plan_type or "").strip().lower()
+    name = _PLAN_NAMES.get(key, key.title() if key else "Unknown")
+    price = _PLAN_PRICES.get(key)
+    if price:
+        return f"{name} ({price})"
+    return name
+
 
 def _load_auth() -> dict | None:
     """Read ~/.codex/auth.json and return token info, or None."""
@@ -93,6 +109,7 @@ def get_codex_live_usage() -> dict | None:
         return {
             "plan_type": plan_type,
             "plan_name": _PLAN_NAMES.get(plan_type, plan_type.title()),
+            "plan_label": _format_plan_label(plan_type),
             "email": data.get("email", ""),
             "limit_reached": rate.get("limit_reached", False),
             "primary_pct": primary.get("used_percent", 0),

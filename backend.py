@@ -54,6 +54,26 @@ def _select_org(chat_orgs, preferred_id=None):
     return chat_orgs[0] if chat_orgs else None
 
 
+def _format_codex_identity(codex_live):
+    """Build a concise Codex identity label for the top header."""
+    if not codex_live:
+        return ""
+
+    plan = str(codex_live.get("plan_label") or codex_live.get("plan_name", "") or "").strip()
+    email = str(codex_live.get("email", "") or "").strip()
+    account = email.split("@", 1)[0] if "@" in email else email
+    if len(account) > 18:
+        account = account[:15] + "..."
+
+    if account and plan:
+        return f"{account} - {plan}"
+    if plan:
+        return f"Codex {plan}"
+    if account:
+        return account
+    return "Codex"
+
+
 def _build_state(tier="pro", username=None, org_id=None, has_session=False,
                  has_cli_creds=False, available_orgs=None, live_usage=None,
                  claude_oauth_usage=None, cli_stats=None, claude_code_stats=None,
@@ -70,8 +90,9 @@ def _build_state(tier="pro", username=None, org_id=None, has_session=False,
     price = tier_info["price"]
     tier_label = tier_info["name"] if price == tier_info["name"] else f"{tier_info['name']} ({price})"
     header = f"{username} - {tier_label}" if username else tier_label
-    if has_cli_creds:
-        header += "  \u2713"
+    codex_identity = _format_codex_identity(codex_live)
+    if codex_identity:
+        header = f"{header} / {codex_identity}"
     menu_items.append({"type": "item", "title": header})
     menu_items.append({"type": "separator"})
 
@@ -181,7 +202,8 @@ def _build_state(tier="pro", username=None, org_id=None, has_session=False,
         menu_items.append({"type": "separator"})
 
         if codex_live:
-            header = f"\u2500\u2500 Codex ({codex_live['plan_name']}) \u2500\u2500"
+            codex_plan = codex_live.get("plan_label") or codex_live.get("plan_name", "Unknown")
+            header = f"\u2500\u2500 Codex ({codex_plan}) \u2500\u2500"
         else:
             header = "\u2500\u2500 Codex \u2500\u2500"
         menu_items.append({"type": "item", "title": header})
