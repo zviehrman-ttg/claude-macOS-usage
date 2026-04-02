@@ -74,6 +74,36 @@ def _format_codex_identity(codex_live):
     return "Codex"
 
 
+def _short_duration_from_seconds(total_seconds):
+    """Compact duration label for top-level summaries."""
+    if total_seconds <= 0:
+        return "now"
+    total_minutes = max(1, (int(total_seconds) + 59) // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _short_reset_from_iso(reset_iso):
+    """Convert reset ISO timestamp to compact remaining duration."""
+    if not reset_iso:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(reset_iso).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(dt.tzinfo)
+        secs = int((dt - now).total_seconds())
+        return _short_duration_from_seconds(secs)
+    except Exception:
+        return ""
+
+
 def _claude_summary_label(has_session, live_usage, claude_oauth_usage):
     """Compact top-level summary label for Claude submenu."""
     pct = None
@@ -86,6 +116,9 @@ def _claude_summary_label(has_session, live_usage, claude_oauth_usage):
         elif plan_mode == "token_cap":
             pct = live_usage["session"]["percent"]
             suffix = f"{pct}%"
+            short_reset = _short_reset_from_iso(live_usage["session"].get("resets_at_iso"))
+            if short_reset:
+                suffix = f"{suffix} · reset in {short_reset}"
         else:
             suffix = "usage unavailable"
     elif has_session:
@@ -95,6 +128,9 @@ def _claude_summary_label(has_session, live_usage, claude_oauth_usage):
         if fh:
             pct = int(fh.get("utilization", 0))
             suffix = f"{pct}%"
+            short_reset = _short_reset_from_iso(fh.get("resets_at"))
+            if short_reset:
+                suffix = f"{suffix} · reset in {short_reset}"
 
     if pct is None:
         dot = "\U0001F535"  # blue
@@ -111,6 +147,7 @@ def _codex_summary_label(codex_live, codex_stats):
     """Compact top-level summary label for Codex submenu."""
     if codex_live:
         pct = codex_live.get("primary_pct")
+        short_reset = _short_duration_from_seconds(codex_live.get("primary_reset_s", 0))
         if codex_live.get("limit_reached"):
             dot = "\U0001F534"  # red
         elif pct > 80:
@@ -119,6 +156,8 @@ def _codex_summary_label(codex_live, codex_stats):
             dot = "\U0001F7E1"  # yellow
         else:
             dot = "\U0001F7E2"  # green
+        if short_reset:
+            return f"{dot} Codex \u00B7 {pct}% \u00B7 reset in {short_reset}"
         return f"{dot} Codex \u00B7 {pct}%"
     if codex_stats:
         return "\U0001F535 Codex \u00B7 local stats only"

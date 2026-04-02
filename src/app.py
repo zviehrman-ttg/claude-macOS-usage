@@ -81,6 +81,36 @@ def _format_codex_identity(codex_live):
     return "Codex"
 
 
+def _short_duration_from_seconds(total_seconds):
+    """Compact duration label for top-level summaries."""
+    if total_seconds <= 0:
+        return "now"
+    total_minutes = max(1, (int(total_seconds) + 59) // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _short_reset_from_iso(reset_iso):
+    """Convert reset ISO timestamp to compact remaining duration."""
+    if not reset_iso:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(reset_iso).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(dt.tzinfo)
+        secs = int((dt - now).total_seconds())
+        return _short_duration_from_seconds(secs)
+    except Exception:
+        return ""
+
+
 class ClaudeUsageApp(rumps.App):
     def __init__(self):
         super().__init__(APP_NAME, title="\u2728", quit_button=None)
@@ -197,6 +227,9 @@ class ClaudeUsageApp(rumps.App):
             elif plan_mode == "token_cap":
                 pct = self.live_usage["session"]["percent"]
                 suffix = f"{pct}%"
+                short_reset = _short_reset_from_iso(self.live_usage["session"].get("resets_at_iso"))
+                if short_reset:
+                    suffix = f"{suffix} · reset in {short_reset}"
             else:
                 suffix = "usage unavailable"
         elif self.has_session:
@@ -206,6 +239,9 @@ class ClaudeUsageApp(rumps.App):
             if fh:
                 pct = int(fh.get("utilization", 0))
                 suffix = f"{pct}%"
+                short_reset = _short_reset_from_iso(fh.get("resets_at"))
+                if short_reset:
+                    suffix = f"{suffix} · reset in {short_reset}"
 
         if pct is None:
             dot = "\U0001F535"  # blue
@@ -221,8 +257,8 @@ class ClaudeUsageApp(rumps.App):
         """Top-level compact summary for the Codex submenu."""
         live = self.codex_live
         if live:
-            plan = live.get("plan_label") or live.get("plan_name", "Unknown")
             pct = live.get("primary_pct")
+            short_reset = _short_duration_from_seconds(live.get("primary_reset_s", 0))
             if live.get("limit_reached"):
                 dot = "\U0001F534"  # red
             elif pct > 80:
@@ -231,7 +267,9 @@ class ClaudeUsageApp(rumps.App):
                 dot = "\U0001F7E1"  # yellow
             else:
                 dot = "\U0001F7E2"  # green
-            return f"{dot} Codex \u00B7 {pct}% ({plan})"
+            if short_reset:
+                return f"{dot} Codex \u00B7 {pct}% \u00B7 reset in {short_reset}"
+            return f"{dot} Codex \u00B7 {pct}%"
         if self.codex_stats:
             return "\U0001F535 Codex \u00B7 local stats only"
         return "\u26AA Codex \u00B7 not connected"
